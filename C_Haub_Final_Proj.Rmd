@@ -1,0 +1,523 @@
+---
+title: "FinalProjectHaub"
+author: "Haub"
+date: '2023-04-02'
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+# Imported Libraries 
+```{r}
+library(tswge)
+library(magrittr)
+library(dplyr)
+library(tidyverse)
+library(stats)
+library(matlab)
+library(tseries)
+library(vars)
+library(RColorBrewer)
+library(nnfor)
+library(keras)
+library(tfruns)
+library(tinytex)
+```
+
+# Import merged data frame
+```{r}
+flightdf=read.csv("D:/SMUMSDS/TimeSeries/Final Project/ModAirDelay2018V3.csv", header = TRUE)
+head(flightdf)
+```
+
+# EDA
+```{r}
+plotts.wge(flightdf$avg_dep_delay) 
+parzen.wge(flightdf$avg_dep_delay)
+acf(flightdf$avg_dep_delay, lag.max = 100)
+parzen.wge(flightdf$avg_dep_delay, trunc = 300)
+```
+
+# Model 1
+# Difference the data for average flight delays
+Looks close to white noise after differenced 
+```{r}
+FD_1 = artrans.wge(flightdf$avg_dep_delay,1)
+acf(FD_1,lag.max = 200) 
+```
+
+# (1-B^19)Xt=at
+```{r}
+FD_1_19 = artrans.wge(FD_1, phi.tr = c(rep(0,18),1)) 
+aic5.wge(FD_1_19)
+aic5.wge(FD_1_19, type = "bic") 
+```
+
+# Model ARMA (5,0), 19
+```{r}
+e = est.ar.wge(FD_1_19,p = 5) 
+e$phi
+```
+# AR Trans
+```{r}
+FD_1_19_AR5 = artrans.wge(FD_1_19, phi.tr = e$phi)
+ljung.wge(FD_1_19_AR5) 
+ljung.wge(FD_1_19_AR5, K = 48)
+```
+# Forecast ARIMA model
+```{r}
+fore_arima = fore.arima.wge(flightdf$avg_dep_delay,
+                            d = 1, s = 19, phi = e$phi,
+                            n.ahead = 19, lastn = TRUE, limits = FALSE) 
+```
+# Rolling Window
+# Average how much each prediction off in minutes, for last 19 observations 
+```{r include=FALSE, results='hide'}
+roll.win.rmse.wge(flightdf$avg_dep_delay,s = 19, d = 1, phi = e$phi, h = 19)
+```
+# How much prediction are off for last 19 obs
+```{r}
+mean((fore_arima$f- tail(flightdf$avg_dep_delay,19))^2)
+
+```
+# Model ARMA (5,0), 57
+```{r}
+fore_arima_lt = fore.arima.wge(flightdf$avg_dep_delay,d = 1, s = 19, phi = e$phi,
+                            n.ahead = 57, lastn = TRUE, limits = FALSE) 
+```
+# Average how much each prediction off in minutes, for last 57 observations 
+```{r include=FALSE, results='hide'}
+roll.win.rmse.wge(flightdf$avg_dep_delay,s = 19, d = 1, phi = e$phi, h = 57)
+```
+# Model ARMA (0,1), 19
+```{r}
+e = est.arma.wge(FD_1_19,q = 1) 
+e$theta
+```
+# Forecast
+```{r}
+fore_arima = fore.arima.wge(flightdf$avg_dep_delay,d = 1, s = 19, theta = e$theta,
+                            n.ahead = 19, lastn = TRUE, limits = FALSE) 
+```
+#ASE
+```{r}
+ASE_B19_ARMA01 = mean((fore_arima$f- tail(flightdf$avg_dep_delay,19))^2)
+ASE_B19_ARMA01
+```
+# Average how much each prediction off in minutes, for last 19 observations 
+```{r include=FALSE, results='hide'}
+RMSE_ARMA01 = roll.win.rmse.wge(flightdf$avg_dep_delay,s = 19, d = 1, theta = e$theta, h = 19)
+```
+# Forecast
+```{r}
+fore_arima = fore.arima.wge(flightdf$avg_dep_delay,d = 1, s = 19, theta = e$theta,
+                            n.ahead = 19, lastn = FALSE, limits = TRUE)
+```
+# Multivariate Analysis
+# Forecast temperature
+```{r}
+temp = flightdf$avg_temp
+temp_small = temp[1:6821]
+temp_small
+plotts.sample.wge(temp)
+acf(temp)
+```
+# Selected ARMA (4,2)
+```{r}
+aic5.wge(temp) 
+aic5.wge(temp,type = "bic")
+est_temp_ARMA_4_2 = est.arma.wge(temp_small, p = 4, q = 2)
+```
+# Factor table shows seasonality of 19, peaks at every 19th unit
+```{r}
+factor.wge(phi=c(rep(0,18),1))
+parzen.wge(temp)
+```
+# (1-B^19)Xt=at
+```{r}
+temp_1_19 = artrans.wge(temp, c(rep(0,18),1))
+temp_1_19
+plotts.sample.wge(temp_1_19)
+aic5.wge(temp_1_19)
+```
+# Fail to reject Ho
+```{r}
+temp_ARMA_3_2 = est.arma.wge(temp, p = 3, q = 2)
+plotts.sample.wge(temp_ARMA_3_2$res)
+ljung.wge(temp_ARMA_3_2$res)$pval 
+ljung.wge(temp_ARMA_3_2$res, K = 48)$pval 
+```
+# Rolling Window ARMA (3,2), 19
+```{r include=FALSE, results='hide'}
+roll.win.rmse.wge(temp, phi=temp_ARMA_3_2$phi, horizon = 19)
+```
+# Predictions for average temperature 
+```{r}
+preds_avg_temp = fore.arma.wge(temp, phi=temp_ARMA_3_2$phi, n.ahead = 19)
+preds_avg_temp
+plot(preds_avg_temp$f, type = "l")
+```
+# Predict previous 19
+```{r}
+preds_avg_temp = fore.arma.wge(temp, phi=temp_ARMA_3_2$phi, n.ahead = 19, lastn=TRUE)
+preds_avg_temp
+plot(preds_avg_temp$f, type = "l")
+
+plot(seq(6500,6840,1), temp[6500 : 6840], type = "l",xlim = c(6500,6859),
+     ylim =c(32,70), ylab = "Avg Temp", main = "Temp Forecast")
+lines(seq(6822,6840,1), preds_avg_temp$f, type = "l", col = "red")
+```
+# Predict next 19
+```{r}
+length(seq(1, 6840, 1)) # length of x vector
+length(temp) # length of y vector
+
+plot(seq(6500,6840,1), temp[6500 : 6840], type = "l",xlim = c(6500,6859),
+     ylim =c(35,70), ylab = "Avg Temp", main = "Temp Forecast")
+lines(seq(6841,6859,1), preds_avg_temp$f, type = "l", col = "red")
+```
+# Forecast humidity
+```{r}
+humid = flightdf$avg_humidity
+humid_small = humid[1:6821]
+humid_small
+plotts.sample.wge(humid)
+```
+# AIC Selected (5,0), (4,0)
+```{r}
+aic5.wge(humid) 
+aic5.wge(humid,type = "bic") 
+est_temp_ARMA_5_0 = est.arma.wge(humid_small, p = 5, q = 0)
+```
+# (1-B^19)Xt=at
+```{r}
+humid_1_19 = artrans.wge(temp, c(rep(0,18),1))
+humid_1_19
+plotts.sample.wge(humid_1_19)
+aic5.wge(humid_1_19)
+```
+# Fail to reject Ho
+```{r}
+humid_ARMA_3_2 = est.arma.wge(temp, p = 3, q = 2)
+plotts.sample.wge(humid_ARMA_3_2$res)
+ljung.wge(humid_ARMA_3_2$res)$pval 
+ljung.wge(humid_ARMA_3_2$res, K = 48)$pval 
+```
+# Rolling window
+```{r include=FALSE, results='hide'}
+roll.win.rmse.wge(temp, phi=humid_ARMA_3_2$phi, horizon = 19)
+```
+# Prediction average temp
+```{r}
+preds_avg_temp = fore.arma.wge(temp, phi=temp_ARMA_3_2$phi, n.ahead = 19)
+preds_avg_temp
+plot(preds_avg_temp$f, type = "l")
+```
+# Predict last 19
+```{r}
+preds_avg_temp = fore.arma.wge(temp, phi=temp_ARMA_3_2$phi, n.ahead = 19, lastn=TRUE)
+preds_avg_temp
+plot(preds_avg_temp$f, type = "l")
+
+plot(seq(6500,6840,1), temp[6500 : 6840], type = "l",xlim = c(6500,6859),
+     ylim =c(32,70), ylab = "Avg Temp", main = "Temp Forecast")
+lines(seq(6822,6840,1), preds_avg_temp$f, type = "l", col = "red")
+```
+# Predict next 19
+```{r}
+length(seq(1, 6840, 1)) # length of x vector
+length(temp) # length of y vector
+plot(seq(6500,6840,1), temp[6500 : 6840], type = "l",xlim = c(6500,6859),
+     ylim =c(35,70), ylab = "Avg Temp", main = "Temp Forecast")
+lines(seq(6841,6859,1), preds_avg_temp$f, type = "l", col = "red")
+```
+
+# Forecast Humidity
+```{r}
+humid = flightdf$avg_humidity
+humid_small = humid[1:6821]
+humid_small
+plotts.sample.wge(humid)
+```
+# Select ARMA (5,0), (3,2)
+```{r}
+aic5.wge(humid) #5 0 3.603678
+aic5.wge(temp,type = "bic") #3 2 1.915578
+est_temp_ARMA_3_2 = est.arma.wge(humid_small, p = 3, q = 2)
+```
+# (1-B^19)Xt=at
+```{r}
+humid_1_19 = artrans.wge(temp, c(rep(0,18),1))
+humid_1_19
+plotts.sample.wge(humid_1_19)
+aic5.wge(humid_1_19) 
+```
+
+```{r}
+humid_ARMA_3_2 = est.arma.wge(temp, p = 3, q = 2)  
+plotts.sample.wge(humid_ARMA_3_2$res)
+ljung.wge(humid_ARMA_3_2$res)$pval 
+ljung.wge(humid_ARMA_3_2$res, K = 48)$pval 
+```
+# Rolling window, ARMA (3,2) 19
+```{r include=FALSE, results='hide'}
+roll.win.rmse.wge(temp, phi=humid_ARMA_3_2$phi, horizon = 19)
+```
+# Predict previous 19
+```{r}
+preds_avg_humid_prev19 = fore.arma.wge(temp, phi=humid_ARMA_3_2$phi, n.ahead = 19, lastn=TRUE)
+preds_avg_humid_prev19
+plot(preds_avg_humid_prev19$f, type = "l")
+
+plot(seq(6500,6840,1), temp[6500 : 6840], type = "l",xlim = c(6500,6859),
+     ylim =c(25,100), ylab = "Avg Humidity", main = "Humidity Forecast")
+lines(seq(6822,6840,1), preds_avg_humid_prev19$f, type = "l", col = "red")
+```
+# Predict next 19
+```{r}
+preds_avg_humid = fore.arma.wge(temp, phi=humid_ARMA_3_2$phi, n.ahead = 19)
+preds_avg_humid
+# plot(humid_ARMA_3_2$f, type = "l") 
+length(seq(1, 6840, 1)) # length of x vector
+length(temp) # length of y vector
+plot(seq(6500,6840,1), humid[6500 : 6840], type = "l",xlim = c(6500,6859),
+     ylim =c(25,100), ylab = "Avg Humidity", main = "Humidity Forecast")
+lines(seq(6841,6859,1), preds_avg_humid$f, type = "l", col = "red")
+```
+# Add time to component to model trend
+```{r}
+flightdf_small = flightdf[1:6821,]
+flightdf_small
+# add time, have to add time component to model trend
+ksfit = lm(avg_dep_delay~avg_temp+avg_humidity+month+day+DEP_TIME, data = flightdf)
+plotts.sample.wge(ksfit$residuals)
+phi = aic.wge(ksfit$residuals) # aic on residuals, fits an ARMA(2,2)
+phi
+```
+# fitting an ARMA (2,2)
+```{r}
+fit = arima(flightdf_small$avg_dep_delay,order = c(phi$p,0,0), xreg = cbind(
+  flightdf_small$avg_temp, flightdf_small$avg_humidity, flightdf_small$month, flightdf_small$day , flightdf_small$DEP_TIME))
+plotts.sample.wge(fit$residuals)
+AIC(fit)
+```
+
+# VAR, Short
+# Find ASE using last 19, Most useful AIC lag 23, but for others lag 21
+```{r}
+flightdf_small = flightdf[1:6821,]  # 456 = 508-52
+VARselect(cbind(flightdf_small$avg_dep_delay[2:6821], flightdf_small$avg_temp[2:6821], 
+                flightdf_small$avg_humidity[2:6821]),
+          lag.max = 25, season = 19, type = "both") 
+```
+# Predict last 19
+```{r}
+flight_del_VAR = VAR(cbind(flightdf_small$avg_dep_delay[2:6821], flightdf_small$avg_temp[2:6821], flightdf_small$avg_humidity[2:6821]),
+                     season = 19, type = "both",p = 21)
+preds=predict(flight_del_VAR,n.ahead=19)
+
+flight_del_VAR$varresult$y1
+```
+# Average flight delay forecast
+```{r}
+plot(flightdf_small$avg_dep_delay, type = "l", ylim = c(0, 375),xlim = c(6500,6840),
+     ylab = "Flight Delay, Minutes", main = "Average Flight Delay Forecast")
+lines(seq(6822, 6840, 1), preds$fcst$y1[, 1], type = "l", col = "red")
+```
+# ASE
+```{r}
+ASE = mean((flightdf$avg_dep_delay[6822:6840] - preds$fcst$y1[,1])^2)
+ASE
+```
+# Forecast ahead 19
+```{r}
+VARselect(cbind(flightdf$avg_dep_delay, flightdf$avg_temp, 
+                flightdf$avg_humidity),
+          lag.max = 25, season = 19, type = "both")
+
+flight_del_VAR_ahead = VAR(flightdf[,5:7],
+                           season = 19, type = "both",p = 21)
+preds=predict(flight_del_VAR_ahead,n.ahead=19)
+```
+# Average flight delay forecast
+```{r}
+plot(flightdf$avg_dep_delay, type = "l", ylim = c(-10, 375), xlim = c(6500,6859), 
+     ylab = "Flight Delay, Minutes", main = "Average Flight Delay Forecast")
+lines(seq(6841, 6859, 1), preds$fcst$y1[,1], type = "l", col = "red")
+```
+# VAR, Long
+# Find ASE using last 19, Most useful AIC lag 23, but for others lag 21
+```{r}
+flightdf_small57 = flightdf[1:6783,]  # 456 = 508-52
+VARselect(cbind(flightdf_small57$avg_dep_delay[2:6783], flightdf_small57$avg_temp[2:6783], 
+                flightdf_small57$avg_humidity[2:6783]),
+          lag.max = 25, season = 19, type = "both") 
+```
+# Predict last 57
+```{r}
+flight_del_VAR57 = VAR(cbind(flightdf_small57$avg_dep_delay[2:6783], flightdf_small57$avg_temp[2:6783], flightdf_small57$avg_humidity[2:6783]),
+                     season = 19, type = "both",p = 21)
+preds=predict(flight_del_VAR57,n.ahead=57)
+
+flight_del_VAR57$varresult$y1
+
+plot(flightdf_small57$avg_dep_delay, type = "l", ylim = c(0, 375),xlim = c(6500,6840),
+     ylab = "Flight Delay, Minutes", main = "Average Flight Delay Forecast,")
+lines(seq(6784, 6840, 1), preds$fcst$y1[, 1], type = "l", col = "red")
+```
+# ASE
+```{r}
+ASE = mean((flightdf$avg_dep_delay[6784:6840] - preds$fcst$y1[,1])^2)
+ASE
+```
+# Forecast ahead 57
+```{r}
+VARselect(cbind(flightdf$avg_dep_delay, flightdf$avg_temp, 
+                flightdf$avg_humidity),
+          lag.max = 25, season = 19, type = "both")
+
+flight_del_VAR_ahead57 = VAR(cbind(flightdf$avg_dep_delay, flightdf$avg_temp, 
+                                 flightdf$avg_humidity),
+                           season = 19, type = "both",p = 21)
+preds=predict(flight_del_VAR_ahead57,n.ahead=57)
+
+plot(flightdf$avg_dep_delay, type = "l", ylim = c(-10, 375), xlim = c(6500,6897), 
+     ylab = "Flight Delay, Minutes", main = "Average Flight Delay Forecast")
+lines(seq(6841, 6897, 1), preds$fcst$y1[,1], type = "l", col = "red")
+```
+# MLP
+# Creating data frame withholding last 19 values
+```{r}
+flight_small = flightdf[5131:6821,]
+flight_smallDF = data.frame(temperature = ts(flight_small$avg_temp))
+```
+# Using forecast average temp
+```{r}
+fit_mlp_climate = mlp(ts(flight_small$avg_temp),reps = 2, comb = "mean")
+fore_mlp_climate = forecast(fit_mlp_climate, h = 19)
+```
+# Create time series
+```{r}
+flight_smallDF_fore = data.frame(climate = ts(fore_mlp_climate$mean))
+flight_smallDF_fore
+
+flight_smallDF_delay = data.frame(average_delay = ts(flight_small$avg_dep_delay))
+```
+# Use forecast flight delay
+```{r}
+fit_mlp_delay = mlp(ts(flight_smallDF_delay),reps = 1, comb = "mean")
+fore_mlp_delay = forecast(fit_mlp_delay, h = 19)
+fore_mlp_delay
+
+flight_smallDF_delay_fore = data.frame(average_delay = ts(fore_mlp_delay$mean))
+flight_smallDF_delay_fore
+```
+# small temperature + predictions (predictions flight_smallDF)
+```{r}
+small_temp_fore = ts(c(ts(flight_smallDF), fore_mlp_climate$mean))
+head(small_temp_fore)
+```
+# Climate variable
+```{r}
+climate_variable = data.frame(climate = small_temp_fore)
+fit_mlp = mlp(ts(flight_small$avg_dep_delay),reps = 1, xreg = climate_variable)
+fit_mlp
+plot(fit_mlp)
+
+# plot(flightdf$avg_dep_delay, type = "l")
+```
+# Forecast
+```{r}
+fore_mlp = forecast(fit_mlp, h = 19, xreg = climate_variable)
+plot(fore_mlp)
+```
+# ASE
+```{r}
+ASE = mean((flight_smallDF_delay$average_delay[1673:1691] - fore_mlp$mean)^2)
+ASE
+```
+# Predict future MLP, 19, Using reduced data set due to memory limitations
+```{r}
+flight_reduced = flightdf[5131:6840,]
+temp_ts = data.frame(temperature = ts(flight_reduced$avg_temp ))
+```
+#Using forecast average temp
+```{r}
+fit_mlp_climate_ahead = mlp(ts(flight_reduced$avg_temp),reps = 2, comb = "mean")
+fore_mlp_climate_ahead = forecast(fit_mlp_climate_ahead, h = 19)
+```
+# Weather, flight delay, time series
+```{r}
+climate_fore = data.frame(climate = ts(fore_mlp_climate_ahead$mean))
+climate_fore
+```
+# Flight delay forecast
+```{r}
+flight_delay = data.frame(average_delay = ts(flight_reduced$avg_dep_delay ))
+
+fit_mlp_delay_forward = mlp(ts(flight_delay),reps = 2, comb = "mean")
+fore_mlp_delay_forward = forecast(fit_mlp_delay_forward, h = 19)
+fore_mlp_delay_forward
+
+flight_smallDF_delay_fore = data.frame(average_delay = ts(fore_mlp_delay_forward$mean))
+flight_smallDF_delay_fore
+```
+# reduced temperature + predictions (predictions flight_smallDF_delay_fore)
+```{r}
+climate_fore_ahead = ts(c(ts(temp_ts), fore_mlp_climate_ahead$mean))
+head(climate_fore_ahead)
+```
+# Climate variable
+```{r}
+climate_variable = data.frame(climate = climate_fore_ahead)
+fit_mlp = mlp(ts(flight_reduced$avg_dep_delay),reps = 2, xreg = climate_variable)
+fit_mlp
+plot(fit_mlp)
+
+plot(flightdf$avg_dep_delay, type = "l")
+lines(seq(5131,6840,1),fit_mlp$mean,col = "blue")
+```
+# Forecast MLP temperature
+```{r}
+fore_mlp = forecast(fit_mlp, h = 19, xreg = climate_variable)
+plot(fore_mlp)
+```
+# ASE
+```{r}
+ASE = mean((flight_delay$average_delay[1673:1691] - fore_mlp$mean)^2)
+ASE
+```
+# Ensemble
+```{r}
+ensemble = (fore_arima$f + fore_mlp$mean)/2
+
+plot(seq(6822, 6840,1),flightdf$avg_dep_delay[6822:6840], type = "l", ylim=c(0,100))
+lines(seq(6822, 6840,1),ensemble,col = "green")
+```
+# ASE
+```{r}
+ASE = mean((flightdf$avg_dep_delay[6822:6840] - ensemble)^2)
+ASE
+```
+
+
+
+
+
+
+
+
+
